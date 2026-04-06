@@ -50,7 +50,7 @@ OpenWrist/
 
 ## 🎥 How It Works
 1. Insert a microSD card into the device  
-2. Load a compatible video (use mp4ToAvi.py script to convert .mp4 to compatible .avi frames)  
+2. Load a compatible video (use scripts/mp4ToAvi.py script to convert from .mp4 to compatible .avi frames)  
 3. Power on the watch  
 4. Enjoy your personalized *video‑watch*  
 
