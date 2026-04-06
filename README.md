@@ -14,22 +14,43 @@ The idea is simple: **a wristwatch that becomes a video canvas**, where anyone c
 
 ## 🛠️ Key Features
 - Video playback from microSD  
-- Fully open‑source firmware  
-- Display compatible with custom animations  
-- Modular structure (hardware + firmware)  
-- Support for personalized video loops  
+- Stable 30 FPS
+- Precise RTC
+- Accelerometer for turn on via wrist movement
+- Fully open‑source firmware and hardware
 - Designed for makers, videographers, and digital artists  
 - Clear, community‑oriented documentation  
 
 ---
 
 ## 📦 Repository Structure
+```text
+OpenWrist/
+├── Binaries/
+├── Includes/
+├── Core/
+│   ├── Inc/
+│   ├── Src/
+│   ├── Startup/
+├── Drivers/
+├── FATFS/
+├── Middlewares/
+├── Utilities/
+├── Debug/
+├── Release/
+├── Docs/
+├── Lib/
+├── Doxyfile
+├── OpenWrist.ioc
+├── STM32H7B0RBTX_FLASH.ld
+└── STM32H7B0RBTX_RAM.ld
+```
 
 ---
 
 ## 🎥 How It Works
 1. Insert a microSD card into the device  
-2. Load a compatible video (format and specs in the documentation)  
+2. Load a compatible video (use mp4ToAvi.py script to convert .mp4 to compatible .avi frames)  
 3. Power on the watch  
 4. Enjoy your personalized *video‑watch*  
 
