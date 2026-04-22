@@ -168,6 +168,7 @@ extern uint8_t *outputData;
 int smart_watch_init(void);
 int smart_watch_process(void);
 int lcd_draw(uint8_t *data);
+int lcd_draw_string(uint16_t x, uint16_t y, const char *str, uint16_t color, uint16_t bg_color);
 #ifdef OPT
 int lcd_draw_opt(uint8_t *data);
 #endif

@@ -8,6 +8,7 @@
 /* Includes ------------------------------------------------------------------*/
 
 #include <stdio.h>
+#include <string.h>
 
 #include "smart_watch.h"
 
@@ -18,6 +19,7 @@
 
 #define DIR_MAX_NUM	10
 #define FILE_NUM 720
+#define ROOT_PATH "0:/"
 
 #define OFFSET_FACTOR 0.341 // ( 1 / 3 ): 1 min every 3 days
 #define MAX_ATTEMPTS_NUM 10
@@ -50,7 +52,7 @@ struct dir_list_st
 uint8_t dir_count = 0;
 
 /** Seected directory path name */
-char *dir_path = NULL;
+char dir_path[64] = ROOT_PATH;
 
 /** File system object for SD card logical drive */
 FATFS SDFatFs;
@@ -158,6 +160,18 @@ static uint8_t check_accel_gesture(void);
 
 /** @brief Get sub directories list */
 static int get_sub_dir(void);
+
+/** @brief Draw directory selection UI */
+static void select_dir_draw(uint8_t dir_idx);
+
+/** @brief Draw a single pixel in RGB565 format */
+static int lcd_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
+
+/** @brief Return 5x7 glyph columns for supported ASCII characters */
+static const uint8_t *get_glyph_5x7(char c);
+
+/** @brief Draw a single 5x7 character */
+static int lcd_draw_char(uint16_t x, uint16_t y, char c, uint16_t color, uint16_t bg_color);
 
 /* External functions --------------------------------------------------------*/
 
@@ -305,6 +319,248 @@ int lcd_draw(uint8_t *data)
 	ret = GC9A01_spi_tx(&data[total_bytes], total_bytes, 0);
 
 	return ret;
+}
+
+/**
+ * @brief Draw a text string using a tiny 5x7 bitmap font
+ *
+ * @param x Start X coordinate
+ * @param y Start Y coordinate
+ * @param str Null-terminated string to draw
+ * @param color Foreground color in RGB565
+ * @param bg_color Background color in RGB565
+ * @return int 1 on success, -1 on error
+ */
+int lcd_draw_string(uint16_t x, uint16_t y, const char *str, uint16_t color, uint16_t bg_color)
+{
+	if (str == NULL)
+		return -1;
+
+	uint16_t cursor_x = x;
+	uint16_t cursor_y = y;
+	const uint16_t start_x = x;
+
+	while (*str != '\0')
+	{
+		if (*str == '\n')
+		{
+			cursor_x = start_x;
+			cursor_y += 8;
+			str++;
+			continue;
+		}
+
+		if ((cursor_x + 5U) >= LCD_X_SIZE)
+		{
+			cursor_x = start_x;
+			cursor_y += 8;
+		}
+
+		if ((cursor_y + 7U) >= LCD_Y_SIZE)
+			break;
+
+		if (lcd_draw_char(cursor_x, cursor_y, *str, color, bg_color) != 1)
+			return -1;
+
+		cursor_x += 6;
+		str++;
+	}
+
+	return 1;
+}
+
+static int lcd_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
+{
+	struct GC9A01_frame frame;
+	uint8_t pixel_data[2];
+
+	if ((x >= LCD_X_SIZE) || (y >= LCD_Y_SIZE))
+		return 1;
+
+	frame.start.X = x;
+	frame.start.Y = y;
+	frame.end.X = x;
+	frame.end.Y = y;
+
+	pixel_data[0] = (uint8_t)(color >> 8);
+	pixel_data[1] = (uint8_t)(color & 0xFFU);
+
+	if (GC9A01_set_frame(frame) != 1)
+		return -1;
+	if (GC9A01_write_command(MEM_WR) != 1)
+		return -1;
+	if (GC9A01_write_data(pixel_data, sizeof(pixel_data)) != 1)
+		return -1;
+
+	return 1;
+}
+
+static const uint8_t *get_glyph_5x7(char c)
+{
+	/* 5 columns, LSB is the top pixel for each column */
+	static const uint8_t GLYPH_SPACE[5] = {0x00, 0x00, 0x00, 0x00, 0x00};
+	static const uint8_t GLYPH_QMARK[5] = {0x02, 0x01, 0x59, 0x09, 0x06};
+
+	static const uint8_t GLYPH_DOT[5] = {0x00, 0x60, 0x60, 0x00, 0x00};
+	static const uint8_t GLYPH_COLON[5] = {0x00, 0x36, 0x36, 0x00, 0x00};
+	static const uint8_t GLYPH_MINUS[5] = {0x08, 0x08, 0x08, 0x08, 0x08};
+	static const uint8_t GLYPH_UNDERSCORE[5] = {0x40, 0x40, 0x40, 0x40, 0x40};
+	static const uint8_t GLYPH_SLASH[5] = {0x20, 0x10, 0x08, 0x04, 0x02};
+
+	static const uint8_t GLYPH_0[5] = {0x3E, 0x51, 0x49, 0x45, 0x3E};
+	static const uint8_t GLYPH_1[5] = {0x00, 0x42, 0x7F, 0x40, 0x00};
+	static const uint8_t GLYPH_2[5] = {0x42, 0x61, 0x51, 0x49, 0x46};
+	static const uint8_t GLYPH_3[5] = {0x21, 0x41, 0x45, 0x4B, 0x31};
+	static const uint8_t GLYPH_4[5] = {0x18, 0x14, 0x12, 0x7F, 0x10};
+	static const uint8_t GLYPH_5[5] = {0x27, 0x45, 0x45, 0x45, 0x39};
+	static const uint8_t GLYPH_6[5] = {0x3C, 0x4A, 0x49, 0x49, 0x30};
+	static const uint8_t GLYPH_7[5] = {0x01, 0x71, 0x09, 0x05, 0x03};
+	static const uint8_t GLYPH_8[5] = {0x36, 0x49, 0x49, 0x49, 0x36};
+	static const uint8_t GLYPH_9[5] = {0x06, 0x49, 0x49, 0x29, 0x1E};
+
+	static const uint8_t GLYPH_A[5] = {0x7E, 0x11, 0x11, 0x11, 0x7E};
+	static const uint8_t GLYPH_B[5] = {0x7F, 0x49, 0x49, 0x49, 0x36};
+	static const uint8_t GLYPH_C[5] = {0x3E, 0x41, 0x41, 0x41, 0x22};
+	static const uint8_t GLYPH_D[5] = {0x7F, 0x41, 0x41, 0x22, 0x1C};
+	static const uint8_t GLYPH_E[5] = {0x7F, 0x49, 0x49, 0x49, 0x41};
+	static const uint8_t GLYPH_F[5] = {0x7F, 0x09, 0x09, 0x09, 0x01};
+	static const uint8_t GLYPH_G[5] = {0x3E, 0x41, 0x49, 0x49, 0x7A};
+	static const uint8_t GLYPH_H[5] = {0x7F, 0x08, 0x08, 0x08, 0x7F};
+	static const uint8_t GLYPH_I[5] = {0x00, 0x41, 0x7F, 0x41, 0x00};
+	static const uint8_t GLYPH_J[5] = {0x20, 0x40, 0x41, 0x3F, 0x01};
+	static const uint8_t GLYPH_K[5] = {0x7F, 0x08, 0x14, 0x22, 0x41};
+	static const uint8_t GLYPH_L[5] = {0x7F, 0x40, 0x40, 0x40, 0x40};
+	static const uint8_t GLYPH_M[5] = {0x7F, 0x02, 0x0C, 0x02, 0x7F};
+	static const uint8_t GLYPH_N[5] = {0x7F, 0x04, 0x08, 0x10, 0x7F};
+	static const uint8_t GLYPH_O[5] = {0x3E, 0x41, 0x41, 0x41, 0x3E};
+	static const uint8_t GLYPH_P[5] = {0x7F, 0x09, 0x09, 0x09, 0x06};
+	static const uint8_t GLYPH_Q[5] = {0x3E, 0x41, 0x51, 0x21, 0x5E};
+	static const uint8_t GLYPH_R[5] = {0x7F, 0x09, 0x19, 0x29, 0x46};
+	static const uint8_t GLYPH_S[5] = {0x46, 0x49, 0x49, 0x49, 0x31};
+	static const uint8_t GLYPH_T[5] = {0x01, 0x01, 0x7F, 0x01, 0x01};
+	static const uint8_t GLYPH_U[5] = {0x3F, 0x40, 0x40, 0x40, 0x3F};
+	static const uint8_t GLYPH_V[5] = {0x1F, 0x20, 0x40, 0x20, 0x1F};
+	static const uint8_t GLYPH_W[5] = {0x7F, 0x20, 0x18, 0x20, 0x7F};
+	static const uint8_t GLYPH_X[5] = {0x63, 0x14, 0x08, 0x14, 0x63};
+	static const uint8_t GLYPH_Y[5] = {0x03, 0x04, 0x78, 0x04, 0x03};
+	static const uint8_t GLYPH_Z[5] = {0x61, 0x51, 0x49, 0x45, 0x43};
+
+	if ((c >= 'a') && (c <= 'z'))
+		c = (char)(c - ('a' - 'A'));
+
+	switch (c)
+	{
+	case ' ':
+		return GLYPH_SPACE;
+	case '.':
+		return GLYPH_DOT;
+	case ':':
+		return GLYPH_COLON;
+	case '-':
+		return GLYPH_MINUS;
+	case '_':
+		return GLYPH_UNDERSCORE;
+	case '/':
+		return GLYPH_SLASH;
+	case '0':
+		return GLYPH_0;
+	case '1':
+		return GLYPH_1;
+	case '2':
+		return GLYPH_2;
+	case '3':
+		return GLYPH_3;
+	case '4':
+		return GLYPH_4;
+	case '5':
+		return GLYPH_5;
+	case '6':
+		return GLYPH_6;
+	case '7':
+		return GLYPH_7;
+	case '8':
+		return GLYPH_8;
+	case '9':
+		return GLYPH_9;
+	case 'A':
+		return GLYPH_A;
+	case 'B':
+		return GLYPH_B;
+	case 'C':
+		return GLYPH_C;
+	case 'D':
+		return GLYPH_D;
+	case 'E':
+		return GLYPH_E;
+	case 'F':
+		return GLYPH_F;
+	case 'G':
+		return GLYPH_G;
+	case 'H':
+		return GLYPH_H;
+	case 'I':
+		return GLYPH_I;
+	case 'J':
+		return GLYPH_J;
+	case 'K':
+		return GLYPH_K;
+	case 'L':
+		return GLYPH_L;
+	case 'M':
+		return GLYPH_M;
+	case 'N':
+		return GLYPH_N;
+	case 'O':
+		return GLYPH_O;
+	case 'P':
+		return GLYPH_P;
+	case 'Q':
+		return GLYPH_Q;
+	case 'R':
+		return GLYPH_R;
+	case 'S':
+		return GLYPH_S;
+	case 'T':
+		return GLYPH_T;
+	case 'U':
+		return GLYPH_U;
+	case 'V':
+		return GLYPH_V;
+	case 'W':
+		return GLYPH_W;
+	case 'X':
+		return GLYPH_X;
+	case 'Y':
+		return GLYPH_Y;
+	case 'Z':
+		return GLYPH_Z;
+	default:
+		return GLYPH_QMARK;
+	}
+}
+
+static int lcd_draw_char(uint16_t x, uint16_t y, char c, uint16_t color, uint16_t bg_color)
+{
+	const uint8_t *glyph = get_glyph_5x7(c);
+
+	for (uint16_t col = 0; col < 5; col++)
+	{
+		uint8_t column_bits = glyph[col];
+		for (uint16_t row = 0; row < 7; row++)
+		{
+			uint16_t px_color = (column_bits & (1U << row)) ? color : bg_color;
+			if (lcd_draw_pixel((uint16_t)(x + col), (uint16_t)(y + row), px_color) != 1)
+				return -1;
+		}
+	}
+
+	for (uint16_t row = 0; row < 7; row++)
+	{
+		if (lcd_draw_pixel((uint16_t)(x + 5U), (uint16_t)(y + row), bg_color) != 1)
+			return -1;
+	}
+
+	return 1;
 }
 
 #ifdef OPT
@@ -790,8 +1046,7 @@ static int mjpeg_video_processing(void)
 		default:
 		case SETTING_MODE:
 
-			if(dir_count > 0)
-				select_dir();	
+			select_dir();	
 
 			if (clock_setting() != 1)
 				return 0;
@@ -935,7 +1190,15 @@ static void select_dir(void)
 {
 	uint8_t dir_idx = 0;
 
-	dir_path = NULL; 
+	if (dir_count == 0)
+	{
+		snprintf(dir_path, sizeof(dir_path), "%s", ROOT_PATH);
+		return;
+	}
+
+	snprintf(dir_path, sizeof(dir_path), "%s", ROOT_PATH);
+
+	select_dir_draw(dir_idx);
 
 	while (!HAL_GPIO_ReadPin(SET_BTN_GPIO_Port, SET_BTN_Pin));
 
@@ -945,21 +1208,32 @@ static void select_dir(void)
 		{
 			btn_status = BTN_NONE;
 			dir_idx = ((dir_idx + 1) % dir_count);
+			select_dir_draw(dir_idx);
 			HAL_Delay(300);
 		}
 		else if (btn_status == BTN_MINUS)
 		{
 			btn_status = BTN_NONE;
-			dir_idx = (((dir_count - 1) + dir_idx) % dir_idx);
+			dir_idx = ((dir_idx + dir_count - 1U) % dir_count);
+			select_dir_draw(dir_idx);
 			HAL_Delay(300);
 		}
 	}
 
 	btn_status = BTN_NONE;
-	dir_path = dir_list[dir_idx].name;
+	snprintf(dir_path, sizeof(dir_path), "%s%s", ROOT_PATH, dir_list[dir_idx].name);
 	HAL_Delay(300);
 
-	return 0; 
+	return; 
+}
+
+static void select_dir_draw(uint8_t dir_idx)
+{
+	/* RGB565 black uses 0x0000, so clearing the frame buffer with 0 works. */
+	memset(output_data1, 0, (2U * LCD_X_SIZE * LCD_Y_SIZE));
+	lcd_draw(output_data1);
+
+	(void)lcd_draw_string(8, 16, dir_list[dir_idx].name, 0xFFFF, 0x0000);
 }
 
 /**
@@ -1145,6 +1419,7 @@ static int file_handler(uint8_t openFile)
 	/* Each file takes 1m */
 
 	static uint8_t new_file_flag = 1;
+	char file_path[96];
 
 	if (new_file_flag || openFile)
 	{
@@ -1157,8 +1432,13 @@ static int file_handler(uint8_t openFile)
 		snprintf(file_idx_str, sizeof(file_idx_str), "%03d", video.file_idx);
 		snprintf(name, sizeof(name), "a%s.avi", file_idx_str);
 
+		if (strcmp(dir_path, ROOT_PATH) == 0)
+			snprintf(file_path, sizeof(file_path), "%s%s", ROOT_PATH, name);
+		else
+			snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, name);
+
 		/* Open the MJPEG avi file with read access */
-		if (f_open(&MJPEG_File, name, FA_READ) == FR_OK)
+		if (f_open(&MJPEG_File, file_path, FA_READ) == FR_OK)
 		{
 			video.isfirstFrame = 1;
 
