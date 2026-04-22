@@ -266,9 +266,13 @@ int smart_watch_process(void)
 #ifdef DEBUG_TIME
 		uint32_t tempStart = HAL_GetTick();
 #endif
-		/* Check if new file needs to be open */
-		if (file_handler(0) != 1)
-			return 0;
+		/* In setting mode the file is opened after directory selection. */
+		if (video.video_mode == NORMAL_MODE)
+		{
+			/* Check if new file needs to be open */
+			if (file_handler(0) != 1)
+				return 0;
+		}
 
 		/* Video processing unit */
 		if (mjpeg_video_processing() != 1)
@@ -1258,6 +1262,10 @@ static int clock_setting(void)
 
 			while (!HAL_GPIO_ReadPin(SET_BTN_GPIO_Port, SET_BTN_Pin));
 
+			/* Open stream once after directory selection and before first frame read. */
+			if (file_handler(1) != 1)
+				return 0;
+
 			video.FrameType = AVI_GetFrame(&AVI_Handel, &MJPEG_File, 0);
 
 			video.set = SET_HOURS;
@@ -1901,7 +1909,6 @@ static void clock_reset_check(void)
 		HAL_Delay(300);
 
 		parameters_reset();
-		file_handler(1);
 	}
 }
 
