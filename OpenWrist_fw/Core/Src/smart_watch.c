@@ -16,6 +16,9 @@
 #include "AVI_parser.h"
 #include "fatfs.h"
 
+#define DIR_MAX_NUM	10
+#define FILE_NUM 720
+
 #define OFFSET_FACTOR 0.341 // ( 1 / 3 ): 1 min every 3 days
 #define MAX_ATTEMPTS_NUM 10
 #define MAX_ITERATIONS_NUM 1000000
@@ -36,6 +39,18 @@ enum button_status btn_status = BTN_NONE;
 
 /** File name */
 char name[14];
+
+/** Directories list */
+struct dir_list_st
+{
+	char name[50];
+}dir_list[DIR_MAX_NUM];
+
+/** Number of directories */
+uint8_t dir_count = 0;
+
+/** Seected directory path name */
+char *dir_path = NULL;
 
 /** File system object for SD card logical drive */
 FATFS SDFatFs;
@@ -99,6 +114,9 @@ static int file_handler(uint8_t openFile);
 /** @brief Manage battery status */
 static int battery_management(void);
 
+/** @brief Directory selection */
+static void select_dir(void);
+
 /** @brief Set clock settings */
 static int clock_setting(void);
 
@@ -137,6 +155,9 @@ static void resume_time(void);
 
 /** @brief Check accelerometer gesture */
 static uint8_t check_accel_gesture(void);
+
+/** @brief Get sub directories list */
+static int get_sub_dir(void);
 
 /* External functions --------------------------------------------------------*/
 
@@ -201,6 +222,10 @@ int smart_watch_init(void)
 	{
 		return 0;
 	}
+
+	/* Get directories list */
+	get_sub_dir();
+
 	return 1;
 }
 
@@ -765,6 +790,9 @@ static int mjpeg_video_processing(void)
 		default:
 		case SETTING_MODE:
 
+			if(dir_count > 0)
+				select_dir();	
+
 			if (clock_setting() != 1)
 				return 0;
 
@@ -897,6 +925,41 @@ static int clock_normal(void)
 	}
 
 	return 1;
+}
+
+/**
+ * @brief select_dir
+ * 
+ */
+static void select_dir(void)
+{
+	uint8_t dir_idx = 0;
+
+	dir_path = NULL; 
+
+	while (!HAL_GPIO_ReadPin(SET_BTN_GPIO_Port, SET_BTN_Pin));
+
+	while (btn_status != BTN_SET)
+	{
+		if (btn_status == BTN_PLUS)
+		{
+			btn_status = BTN_NONE;
+			dir_idx = ((dir_idx + 1) % dir_count);
+			HAL_Delay(300);
+		}
+		else if (btn_status == BTN_MINUS)
+		{
+			btn_status = BTN_NONE;
+			dir_idx = (((dir_count - 1) + dir_idx) % dir_idx);
+			HAL_Delay(300);
+		}
+	}
+
+	btn_status = BTN_NONE;
+	dir_path = dir_list[dir_idx].name;
+	HAL_Delay(300);
+
+	return 0; 
 }
 
 /**
@@ -1113,7 +1176,7 @@ static int file_handler(uint8_t openFile)
 	if (AVI_Handel.CurrentImage >= AVI_Handel.aviInfo.TotalFrame)
 	{
 		video.file_idx++;
-		video.file_idx %= 720; // Restart the index every 24 files ( 12h )
+		video.file_idx %= FILE_NUM; // Restart the index every 720 files ( 12h )
 
 		/*  wait for the Last DMA2D transfer to ends */
 		if (HAL_DMA2D_PollForTransfer(&DMA2D_Handle, 50) != HAL_OK)
@@ -1604,6 +1667,34 @@ static void clear_btn_int(void)
 	HAL_NVIC_ClearPendingIRQ(EXTI0_IRQn);
 	HAL_NVIC_ClearPendingIRQ(EXTI1_IRQn);
 	HAL_NVIC_ClearPendingIRQ(EXTI2_IRQn);
+}
+
+/**
+ * @brief get_sub_dir
+ * 
+ */
+static int get_sub_dir(void)
+{
+    DIR dir;           // Directory object
+    FILINFO fno;       // File info object
+
+  	if (f_opendir(&dir, "0:/") != FR_OK)
+    	return 0;
+		
+   	while ((f_readdir(&dir, &fno) == FR_OK) && (fno.fname[0] != 0) && (dir_count < DIR_MAX_NUM))
+    {
+        // Check if it's a folder (AM_DIR = attribute directory)
+        if (fno.fattrib & AM_DIR)
+        {
+            // Save folder name
+            snprintf(dir_list[dir_count].name, sizeof(dir_list[dir_count].name), "%s", fno.fname);
+			dir_count++;
+		}
+    }
+    
+    f_closedir(&dir);
+
+	return 1;
 }
 
 /* CallBack functions --------------------------------------------------------*/
