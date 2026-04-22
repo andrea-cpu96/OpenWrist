@@ -2032,7 +2032,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	acc_int = 0;
 	wake_up = 0;
 
-	if (!HAL_GPIO_ReadPin(FXLS8974CF_INT_Port, FXLS8974CF_INT_Pin))
+	if (GPIO_Pin == FXLS8974CF_INT_Pin)
 	{
 		/* Signal accelerometer interrupt */
 
@@ -2044,11 +2044,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 		if (video.video_mode == SETTING_MODE)
 		{
-			if (!HAL_GPIO_ReadPin(PLUS_BTN_GPIO_Port, PLUS_BTN_Pin))
+			if (GPIO_Pin == PLUS_BTN_Pin)
 				btn_status = BTN_PLUS;
-			else if (!HAL_GPIO_ReadPin(SET_BTN_GPIO_Port, SET_BTN_Pin))
+			else if (GPIO_Pin == SET_BTN_Pin)
 				btn_status = BTN_SET;
-			else if (!HAL_GPIO_ReadPin(MINUS_BTN_GPIO_Port, MINUS_BTN_Pin))
+			else if (GPIO_Pin == MINUS_BTN_Pin)
 				btn_status = BTN_MINUS;
 
 			disable_btn_int(); // Disable interrupts until the current one has to be process
