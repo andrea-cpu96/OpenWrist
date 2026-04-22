@@ -18,7 +18,7 @@
 #include "fatfs.h"
 
 #define DIR_MAX_NUM	10
-#define FILE_NUM 720
+#define FILE_NUM 720  // 1h = 720 minutes, so 720 files of 1 minute each
 #define ROOT_PATH "0:/"
 
 #define OFFSET_FACTOR 0.341 // ( 1 / 3 ): 1 min every 3 days
@@ -53,6 +53,9 @@ uint8_t dir_count = 0;
 
 /** Seected directory path name */
 char dir_path[64] = ROOT_PATH;
+
+/** Number of files in selected directory */
+uint16_t file_count = 0;
 
 /** File system object for SD card logical drive */
 FATFS SDFatFs;
@@ -160,6 +163,9 @@ static uint8_t check_accel_gesture(void);
 
 /** @brief Get sub directories list */
 static int get_sub_dir(void);
+
+/** @brief Count files in a directory */
+static uint16_t count_files_in_dir(const char *path);
 
 /** @brief Draw directory selection UI */
 static void select_dir_draw(uint8_t dir_idx);
@@ -1222,6 +1228,7 @@ static void select_dir(void)
 
 	btn_status = BTN_NONE;
 	snprintf(dir_path, sizeof(dir_path), "%s%s", ROOT_PATH, dir_list[dir_idx].name);
+	file_count = count_files_in_dir(dir_path);
 	HAL_Delay(300);
 
 	return; 
@@ -1456,7 +1463,7 @@ static int file_handler(uint8_t openFile)
 	if (AVI_Handel.CurrentImage >= AVI_Handel.aviInfo.TotalFrame)
 	{
 		video.file_idx++;
-		video.file_idx %= FILE_NUM; // Restart the index every 720 files ( 12h )
+		video.file_idx %= (file_count > 0) ? file_count : FILE_NUM; // Restart based on files in directory
 
 		/*  wait for the Last DMA2D transfer to ends */
 		if (HAL_DMA2D_PollForTransfer(&DMA2D_Handle, 50) != HAL_OK)
@@ -1975,6 +1982,35 @@ static int get_sub_dir(void)
     f_closedir(&dir);
 
 	return 1;
+}
+
+/**
+ * @brief count_files_in_dir - Count files in a given directory
+ * 
+ * @param path Directory path (e.g., "0:/" or "0:/MyFolder")
+ * @return Number of files found (0 if directory is empty or cannot be opened)
+ */
+static uint16_t count_files_in_dir(const char *path)
+{
+	DIR dir;
+	FILINFO fno;
+	uint16_t file_count = 0;
+
+	if (f_opendir(&dir, path) != FR_OK)
+		return 0;
+
+	while ((f_readdir(&dir, &fno) == FR_OK) && (fno.fname[0] != 0))
+	{
+		// Count only files (not directories)
+		if (!(fno.fattrib & AM_DIR))
+		{
+			file_count++;
+		}
+	}
+
+	f_closedir(&dir);
+
+	return file_count;
 }
 
 /* CallBack functions --------------------------------------------------------*/
