@@ -24,6 +24,7 @@
 #define OFFSET_FACTOR 0.341 // ( 1 / 3 ): 1 min every 3 days
 #define MAX_ATTEMPTS_NUM 10
 #define MAX_ITERATIONS_NUM 1000000
+#define BTN_INT_DEBOUNCE_MS 200
 
 /* Private typedef -----------------------------------------------------------*/
 
@@ -37,7 +38,10 @@
 const uint8_t num_of_days_per_month[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
 /** Set button status */
-enum button_status btn_status = BTN_NONE;
+volatile enum button_status btn_status = BTN_NONE;
+
+/** Last button interrupt tick for debounce */
+static uint32_t last_btn_int_tick = 0;
 
 /** File name */
 char name[14];
@@ -50,6 +54,9 @@ struct dir_list_st
 
 /** Number of directories */
 uint8_t dir_count = 0;
+
+/** Directory selected flag */
+uint8_t dir_selected = 0;
 
 /** Seected directory path name */
 char dir_path[64] = ROOT_PATH;
@@ -178,6 +185,12 @@ static const uint8_t *get_glyph_5x7(char c);
 
 /** @brief Draw a single 5x7 character */
 static int lcd_draw_char(uint16_t x, uint16_t y, char c, uint16_t color, uint16_t bg_color);
+
+/** @brief Draw a scaled 5x7 character */
+static int lcd_draw_char_scaled(uint16_t x, uint16_t y, char c, uint16_t color, uint16_t bg_color, uint8_t scale);
+
+/** @brief Draw a scaled text string using a tiny 5x7 bitmap font */
+static int lcd_draw_string_scaled(uint16_t x, uint16_t y, const char *str, uint16_t color, uint16_t bg_color, uint8_t scale);
 
 /* External functions --------------------------------------------------------*/
 
@@ -379,6 +392,44 @@ int lcd_draw_string(uint16_t x, uint16_t y, const char *str, uint16_t color, uin
 	return 1;
 }
 
+int lcd_draw_string_scaled(uint16_t x, uint16_t y, const char *str, uint16_t color, uint16_t bg_color, uint8_t scale)
+{
+	if (str == NULL)
+		return -1;
+
+	uint16_t cursor_x = x;
+	uint16_t cursor_y = y;
+	const uint16_t start_x = x;
+
+	while (*str != '\0')
+	{
+		if (*str == '\n')
+		{
+			cursor_x = start_x;
+			cursor_y += (uint16_t)(8U * scale);
+			str++;
+			continue;
+		}
+
+		if ((cursor_x + (5U * scale)) >= LCD_X_SIZE)
+		{
+			cursor_x = start_x;
+			cursor_y += (uint16_t)(8U * scale);
+		}
+
+		if ((cursor_y + (7U * scale)) >= LCD_Y_SIZE)
+			break;
+
+		if (lcd_draw_char_scaled(cursor_x, cursor_y, *str, color, bg_color, scale) != 1)
+			return -1;
+
+		cursor_x += (uint16_t)(6U * scale);
+		str++;
+	}
+
+	return 1;
+}
+
 static int lcd_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
 {
 	struct GC9A01_frame frame;
@@ -568,6 +619,42 @@ static int lcd_draw_char(uint16_t x, uint16_t y, char c, uint16_t color, uint16_
 	{
 		if (lcd_draw_pixel((uint16_t)(x + 5U), (uint16_t)(y + row), bg_color) != 1)
 			return -1;
+	}
+
+	return 1;
+}
+
+static int lcd_draw_char_scaled(uint16_t x, uint16_t y, char c, uint16_t color, uint16_t bg_color, uint8_t scale)
+{
+	const uint8_t *glyph = get_glyph_5x7(c);
+
+	for (uint16_t col = 0; col < 5; col++)
+	{
+		uint8_t column_bits = glyph[col];
+		for (uint16_t row = 0; row < 7; row++)
+		{
+			uint16_t px_color = (column_bits & (1U << row)) ? color : bg_color;
+			for (uint8_t sx = 0; sx < scale; sx++)
+			{
+				for (uint8_t sy = 0; sy < scale; sy++)
+				{
+					if (lcd_draw_pixel((uint16_t)(x + col * scale + sx), (uint16_t)(y + row * scale + sy), px_color) != 1)
+						return -1;
+				}
+			}
+		}
+	}
+
+	for (uint16_t row = 0; row < 7; row++)
+	{
+		for (uint8_t sx = 0; sx < scale; sx++)
+		{
+			for (uint8_t sy = 0; sy < scale; sy++)
+			{
+				if (lcd_draw_pixel((uint16_t)(x + 5U * scale + sx), (uint16_t)(y + row * scale + sy), bg_color) != 1)
+					return -1;
+			}
+		}
 	}
 
 	return 1;
@@ -1056,7 +1143,8 @@ static int mjpeg_video_processing(void)
 		default:
 		case SETTING_MODE:
 
-			select_dir();	
+			if(dir_selected != 1)
+				select_dir();	
 
 			if (clock_setting() != 1)
 				return 0;
@@ -1198,7 +1286,7 @@ static int clock_normal(void)
  */
 static void select_dir(void)
 {
-	uint8_t dir_idx = 0;
+	uint8_t dir_idx = 1;
 
 	if (dir_count == 0)
 	{
@@ -1217,19 +1305,34 @@ static void select_dir(void)
 		if (btn_status == BTN_PLUS)
 		{
 			btn_status = BTN_NONE;
-			dir_idx = ((dir_idx + 1) % dir_count);
+			if (dir_idx < dir_count)
+			{
+				dir_idx++;
+			}
+			else
+			{
+				dir_idx = 1;
+			}
 			select_dir_draw(dir_idx);
-			HAL_Delay(300);
+			enable_btn_int();
 		}
 		else if (btn_status == BTN_MINUS)
 		{
 			btn_status = BTN_NONE;
-			dir_idx = ((dir_idx + dir_count - 1U) % dir_count);
+			if (dir_idx > 1)
+			{
+				dir_idx--;
+			}
+			else
+			{
+				dir_idx = (dir_count - 1);
+			}
 			select_dir_draw(dir_idx);
-			HAL_Delay(300);
+			enable_btn_int();
 		}
 	}
 
+	dir_selected = 1;
 	btn_status = BTN_NONE;
 	snprintf(dir_path, sizeof(dir_path), "%s%s", ROOT_PATH, dir_list[dir_idx].name);
 	file_count = count_files_in_dir(dir_path);
@@ -1244,7 +1347,15 @@ static void select_dir_draw(uint8_t dir_idx)
 	memset(output_data1, 0, (2U * LCD_X_SIZE * LCD_Y_SIZE));
 	lcd_draw(output_data1);
 
-	(void)lcd_draw_string(8, 16, dir_list[dir_idx].name, 0xFFFF, 0x0000);
+	size_t len = strlen(dir_list[dir_idx].name);
+	uint8_t scale = 2;
+	uint16_t text_width = (uint16_t)(len * 6U * scale);
+	uint16_t x = 0;
+	if (text_width < LCD_X_SIZE)
+		x = (LCD_X_SIZE - text_width) / 2U;
+
+	uint16_t y = (LCD_Y_SIZE - (7U * scale)) / 2U;
+	(void)lcd_draw_string_scaled(x, y, dir_list[dir_idx].name, 0xFFFF, 0x0000, scale);
 }
 
 /**
@@ -1283,9 +1394,6 @@ static int clock_setting(void)
 
 				btn_status = BTN_NONE;
 
-				HAL_Delay(300);
-				clear_btn_int();
-
 				video.time.Hours++;
 				video.time.Hours %= 12;
 
@@ -1301,9 +1409,6 @@ static int clock_setting(void)
 			if (btn_status == BTN_MINUS)
 			{
 				btn_status = BTN_NONE;
-
-				HAL_Delay(300);
-				clear_btn_int();
 
 				if (video.time.Hours > 0)
 					video.time.Hours--;
@@ -1322,11 +1427,8 @@ static int clock_setting(void)
 			if (btn_status == BTN_SET)
 			{
 				btn_status = BTN_NONE;
-
-				HAL_Delay(300);
-				clear_btn_int();
-
 				video.set = SET_MINUTES;
+				HAL_Delay(300);
 			}
 
 			break;
@@ -1340,9 +1442,6 @@ static int clock_setting(void)
 			if (btn_status == BTN_PLUS)
 			{
 				btn_status = BTN_NONE;
-
-				HAL_Delay(300);
-				clear_btn_int();
 
 				video.time.Minutes++;
 				video.time.Minutes %= 60;
@@ -1361,9 +1460,6 @@ static int clock_setting(void)
 			if (btn_status == BTN_MINUS)
 			{
 				btn_status = BTN_NONE;
-
-				HAL_Delay(300);
-				clear_btn_int();
 
 				if (video.time.Minutes > 0)
 					video.time.Minutes--;
@@ -1385,9 +1481,6 @@ static int clock_setting(void)
 			{
 
 				btn_status = BTN_NONE;
-
-				HAL_Delay(300);
-				clear_btn_int();
 
 				video.file_idx += video.time.Minutes;
 
@@ -1697,6 +1790,8 @@ static int show_frame(uint32_t frame_num)
  */
 static void parameters_reset(void)
 {
+	dir_selected = 0;
+
 	video.time.Hours = 0;
 	video.time.Minutes = 0;
 	video.time.Seconds = 0;
@@ -1717,6 +1812,8 @@ static void parameters_reset(void)
 	video.frameCount = 0;
 
 	video.set = SET_IDLE;
+
+	enable_btn_int();
 }
 
 /**
@@ -2041,6 +2138,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	else
 	{
 		/* Signal button interrupt */
+
+		uint32_t tick = HAL_GetTick();
+
+		if ((tick - last_btn_int_tick) < BTN_INT_DEBOUNCE_MS)
+		{
+			return;
+		}
+
+		last_btn_int_tick = tick;
 
 		if (video.video_mode == SETTING_MODE)
 		{
